@@ -1,0 +1,15 @@
+.main.o.cmd
+.pci_cdev.o.cmd
+.tmp_versions/
+.vintage2d.ko.cmd
+.vintage2d.mod.o.cmd
+.vintage2d.o.cmd
+Module.symvers
+main.o
+modules.order
+pci_cdev.o
+vintage2d.ko
+vintage2d.mod.c
+vintage2d.mod.o
+vintage2d.o
+
