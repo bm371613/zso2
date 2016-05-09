@@ -9,9 +9,10 @@
 
 #include "pci_cdev.h"
 
-#define MAX_DEVICE	8
-
 MODULE_LICENSE("GPL");
+
+int max_devices = 8;
+module_param(max_devices, int, 0);
 
 static struct pci_device_id v2d_ids[] = {
 	{ PCI_DEVICE(0x1af4, 0x10f2), },
@@ -22,17 +23,17 @@ MODULE_DEVICE_TABLE(pci, v2d_ids);
 
 static dev_t devno;
 static struct class *class;
-static struct pci_cdev pci_cdev[MAX_DEVICE];
+static struct pci_cdev *pci_cdev_table;
 
-/* chardev interace */
+/* chardev interface */
 
 static int
 v2d_open(struct inode *inode, struct file *file)
 {
 	int minor = iminor(inode);
 	file->private_data = (void *) pci_cdev_search_pci_dev(
-		pci_cdev,
-		MAX_DEVICE,
+		pci_cdev_table,
+		max_devices,
 		minor);
 	return 0;
 }
@@ -86,7 +87,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	struct cdev *cdev;
 	struct device *device = NULL;
 
-	if ((minor = pci_cdev_add(pci_cdev, MAX_DEVICE, dev)) < 0) {
+	if ((minor = pci_cdev_add(pci_cdev_table, max_devices, dev)) < 0) {
 		dev_err(&(dev->dev), "pci_cdev_add\n");
 		goto error;
 	}
@@ -98,7 +99,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		dev_err(&(dev->dev), "cdev_add\n");
 		goto error_pci_cdev;
 	}
-	pci_cdev[minor].cdev = cdev;
+	pci_cdev_table[minor].cdev = cdev;
 
 	device = device_create(class, NULL, MKDEV(MAJOR(devno), minor), NULL,
 			"v2d%d", minor);
@@ -126,7 +127,7 @@ error_pci_enable:
 error_cdev:
 	cdev_del(cdev);
 error_pci_cdev:
-	pci_cdev_del(pci_cdev, MAX_DEVICE, dev);
+	pci_cdev_del(pci_cdev_table, max_devices, dev);
 error:
 	return -1;
 }
@@ -140,12 +141,12 @@ v2d_remove(struct pci_dev *dev)
 	pci_release_regions(dev);
 	pci_disable_device(dev);
 
-	minor = pci_cdev_search_minor(pci_cdev, MAX_DEVICE, dev);
-	cdev = pci_cdev_search_cdev(pci_cdev, MAX_DEVICE, minor);
+	minor = pci_cdev_search_minor(pci_cdev_table, max_devices, dev);
+	cdev = pci_cdev_search_cdev(pci_cdev_table, max_devices, minor);
 	device_destroy(class, MKDEV(MAJOR(devno), minor));
 	if (cdev != NULL)
 		cdev_del(cdev);
-	pci_cdev_del(pci_cdev, MAX_DEVICE, dev);
+	pci_cdev_del(pci_cdev_table, max_devices, dev);
 }
 
 static struct pci_driver pci_driver = {
@@ -160,12 +161,19 @@ static struct pci_driver pci_driver = {
 static int __init
 v2d_init_module(void)
 {
-	if (alloc_chrdev_region(&devno, 0, MAX_DEVICE, "v2d") < 0) {
-		printk(KERN_ERR "v2d: alloc_chrdev_region\n");
+	pci_cdev_table = kmalloc(max_devices * sizeof(struct pci_cdev),
+			GFP_KERNEL);
+	if (!pci_cdev_table) {
+		printk(KERN_ERR "v2d: kmalloc\n");
 		goto error;
 	}
 
-	pci_cdev_init(pci_cdev, MAX_DEVICE, MINOR(devno));
+	if (alloc_chrdev_region(&devno, 0, max_devices, "v2d") < 0) {
+		printk(KERN_ERR "v2d: alloc_chrdev_region\n");
+		goto error_kmalloc;
+	}
+
+	pci_cdev_init(pci_cdev_table, max_devices, MINOR(devno));
 
 	class = class_create(THIS_MODULE, "v2d");
 	if (IS_ERR(class)) {
@@ -184,6 +192,8 @@ error_class:
 	class_destroy(class);
 error_chrdev:
 	unregister_chrdev_region(devno, 1);
+error_kmalloc:
+	kfree(pci_cdev_table);
 error:
 	return -1;
 }
@@ -194,13 +204,14 @@ v2d_exit_module(void)
 	int i;
 
 	pci_unregister_driver(&pci_driver);
-	for (i=0; i< MAX_DEVICE; i++) {
-		if (pci_cdev[i].pci_dev != NULL) {
-			cdev_del(pci_cdev[i].cdev);
+	for (i=0; i< max_devices; i++) {
+		if (pci_cdev_table[i].pci_dev != NULL) {
+			cdev_del(pci_cdev_table[i].cdev);
 		}
 	}
-	unregister_chrdev_region(devno, MAX_DEVICE);
 	class_destroy(class);
+	unregister_chrdev_region(devno, max_devices);
+	kfree(pci_cdev_table);
 }
 
 module_init(v2d_init_module);
