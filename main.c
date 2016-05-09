@@ -43,23 +43,38 @@ v2d_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t
-v2d_read(struct file *file, char *buffer, size_t length, loff_t * offset)
+static long
+v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	return 0;
 }
 
+static int
+v2d_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	return -1;
+}
+
 static ssize_t
-v2d_write(struct file *filp, const char *buffer, size_t len, loff_t * off) {
+v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
+{
 	return len;
+}
+
+static int
+v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+{
+	return 0;
 }
 
 static struct file_operations pci_ops = {
 	.owner		= THIS_MODULE,
-	.read 		= v2d_read,
-	.write 		= v2d_write,
 	.open 		= v2d_open,
-	.release 	= v2d_release
+	.release 	= v2d_release,
+	.unlocked_ioctl = v2d_ioctl,
+	.mmap		= v2d_mmap,
+	.write 		= v2d_write,
+	.fsync		= v2d_fsync
 };
 
 /* pci interface */
