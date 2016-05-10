@@ -8,14 +8,17 @@
 #include <asm/uaccess.h>
 
 #include "pci_cdev.h"
+#include "vintage2d.h"
+#include "v2d_ioctl.h"
+#include "v2d_context.h"
 
 MODULE_LICENSE("GPL");
 
-int max_devices = 8;
+int max_devices = 256;
 module_param(max_devices, int, 0);
 
 static struct pci_device_id v2d_ids[] = {
-	{ PCI_DEVICE(0x1af4, 0x10f2), },
+	{ PCI_DEVICE(VINTAGE2D_VENDOR_ID, VINTAGE2D_DEVICE_ID), },
 	{ 0, }
 };
 
@@ -30,24 +33,40 @@ static struct pci_cdev *pci_cdev_table;
 static int
 v2d_open(struct inode *inode, struct file *file)
 {
-	int minor = iminor(inode);
-	file->private_data = (void *) pci_cdev_search_pci_dev(
+	struct pci_dev *dev = pci_cdev_search_pci_dev(
 		pci_cdev_table,
 		max_devices,
-		minor);
+		iminor(inode));
+	v2d_context_t *ctx = v2d_context_create(dev);
+
+	if (!ctx)
+		return -ENOMEM;
+	file->private_data = (void*) ctx;
 	return 0;
 }
 
 static int
 v2d_release(struct inode *inode, struct file *file)
 {
+	v2d_context_discard(file->private_data);
 	return 0;
 }
 
 static long
 v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	return 0;
+	v2d_context_t *ctx = file->private_data;
+	struct v2d_ioctl_set_dimensions dim;
+
+	switch (cmd) {
+	case V2D_IOCTL_SET_DIMENSIONS:
+		if (copy_from_user((void*) &dim, (void*) arg,
+				sizeof(struct v2d_ioctl_set_dimensions)))
+			return -EFAULT;
+		return v2d_context_initialize(ctx, dim.width, dim.height);
+	default:
+		return -EINVAL;
+	}
 }
 
 static int

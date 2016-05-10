@@ -1,3 +1,5 @@
+#ifndef PCI_CDEV_H
+#define PCI_CDEV_H
 struct pci_cdev {
 	int minor;
 	struct pci_dev *pci_dev;
@@ -25,4 +27,5 @@ pci_cdev_search_minor(
 		struct pci_cdev pci_cdev[],
 		int size,
 		struct pci_dev *pdev);
+#endif
 
