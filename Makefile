@@ -1,4 +1,4 @@
-vintage2d-objs := main.o pci_cdev.o v2d_context.o
+vintage2d-objs := main.o v2d_device.o v2d_context.o
 obj-m := vintage2d.o
 
 all:

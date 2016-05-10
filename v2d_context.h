@@ -4,6 +4,7 @@
 #include <linux/pci.h>
 
 #include "vintage2d.h"
+#include "v2d_device.h"
 
 #define MIN_CANVAS_SIZE 1
 #define MAX_CANVAS_SIZE 2048
@@ -16,7 +17,7 @@ typedef struct {
 } dma_addr_mapping_t;
 
 typedef struct {
-	struct pci_dev *dev;
+	v2d_device_t *v2d_dev;
 	uint16_t width;
 	uint16_t height;
 	int canvas_pages_count;
@@ -25,7 +26,7 @@ typedef struct {
 } v2d_context_t;
 
 v2d_context_t *
-v2d_context_create(struct pci_dev *dev);
+v2d_context_create(v2d_device_t *v2d_dev);
 
 bool
 v2d_context_is_initialized(v2d_context_t *ctx);

@@ -1,11 +1,13 @@
 #include "v2d_context.h"
 
+#define LOG_DEV(ctx) (&((ctx)->v2d_dev->dev->dev))
+
 /* helpers*/
 int
-dma_addr_mapping_initialize(dma_addr_mapping_t *dam, struct pci_dev* dev)
+dma_addr_mapping_initialize(dma_addr_mapping_t *dam, v2d_context_t *ctx)
 {
-	dam->addr = dma_alloc_coherent(&(dev->dev), VINTAGE2D_PAGE_SIZE,
-			&dam->dma_handle, GFP_KERNEL);
+	dam->addr = dma_alloc_coherent(&(ctx->v2d_dev->dev->dev),
+			VINTAGE2D_PAGE_SIZE, &dam->dma_handle, GFP_KERNEL);
 	if (!dam->addr) {
 		dam->dma_handle = 0;
 		return -1;
@@ -15,25 +17,25 @@ dma_addr_mapping_initialize(dma_addr_mapping_t *dam, struct pci_dev* dev)
 }
 
 void
-dma_addr_mapping_finalize(dma_addr_mapping_t *dam, struct pci_dev* dev)
+dma_addr_mapping_finalize(dma_addr_mapping_t *dam, v2d_context_t *ctx)
 {
-	dma_free_coherent(&(dev->dev), VINTAGE2D_PAGE_SIZE, dam->addr,
-			dam->dma_handle);
+	dma_free_coherent(&(ctx->v2d_dev->dev->dev), VINTAGE2D_PAGE_SIZE,
+			dam->addr, dam->dma_handle);
 }
 
 /* interface */
 
 v2d_context_t *
-v2d_context_create(struct pci_dev *dev)
+v2d_context_create(v2d_device_t *v2d_dev)
 {
 	v2d_context_t *ctx = kmalloc(sizeof(v2d_context_t), GFP_KERNEL);
 	if (!ctx)
 		return ctx;
 
-	ctx->dev = dev;
+	ctx->v2d_dev = v2d_dev;
 	ctx->canvas_pages_count = 0;
 
-	dev_info(&(ctx->dev->dev), "Device context created");
+	dev_info(LOG_DEV(ctx), "Device context created");
 
 	return ctx;
 }
@@ -67,11 +69,10 @@ v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height)
 			GFP_KERNEL);
 
 	for (i = 0; i < ctx->canvas_pages_count; ++i) {
-		if(dma_addr_mapping_initialize(&ctx->canvas_pages[i],
-					ctx->dev))
+		if(dma_addr_mapping_initialize(&ctx->canvas_pages[i], ctx))
 			goto canvas_failure;
 	}
-	if (dma_addr_mapping_initialize(&ctx->canvas_page_table, ctx->dev))
+	if (dma_addr_mapping_initialize(&ctx->canvas_page_table, ctx))
 		goto canvas_failure;
 
 	page_table = (unsigned *) ctx->canvas_page_table.addr;
@@ -79,14 +80,15 @@ v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height)
 		page_table[i] = VINTAGE2D_PTE_VALID
 			| ctx->canvas_pages[i].dma_handle;
 
-	dev_info(&(ctx->dev->dev), "Device context initialized (%d, %d)",
+	dev_info(LOG_DEV(ctx),
+			"Device context initialized (%d, %d)",
 			width, height);
 
 	return 0;
 
 canvas_failure:
 	while(i--)
-		dma_addr_mapping_finalize(&ctx->canvas_pages[i], ctx->dev);
+		dma_addr_mapping_finalize(&ctx->canvas_pages[i], ctx);
 	kfree(ctx->canvas_pages);
 	ctx->canvas_pages_count = 0;
 	return -ENOMEM;
@@ -98,12 +100,11 @@ v2d_context_discard(v2d_context_t *ctx)
 	int i;
 	if (v2d_context_is_initialized(ctx)) {
 		for (i = 0; i < ctx->canvas_pages_count; ++i)
-			dma_addr_mapping_finalize(&ctx->canvas_pages[i],
-					ctx->dev);
-		dma_addr_mapping_finalize(&ctx->canvas_page_table, ctx->dev);
+			dma_addr_mapping_finalize(&ctx->canvas_pages[i], ctx);
+		dma_addr_mapping_finalize(&ctx->canvas_page_table, ctx);
 		kfree(ctx->canvas_pages);
 		ctx->canvas_pages_count = 0;
 	}
-	dev_info(&(ctx->dev->dev), "Device context discarded");
+	dev_info(LOG_DEV(ctx), "Device context discarded");
 	kfree(ctx);
 }
