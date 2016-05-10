@@ -137,6 +137,10 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		goto error_pci_enable;
 	}
 
+	pci_set_master(dev);
+	pci_set_dma_mask(dev, DMA_BIT_MASK(32));
+	pci_set_consistent_dma_mask(dev, DMA_BIT_MASK(32));
+
 	dev_info(&(dev->dev), "Registered device %d", minor);
 
 	return 0;
