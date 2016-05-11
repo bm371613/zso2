@@ -28,7 +28,46 @@ static dev_t devno;
 static struct class *class;
 static v2d_device_t *devices;
 
-/* chardev interface */
+/* vm */
+void v2d_vm_open(struct vm_area_struct *vma)
+{
+	v2d_context_t *ctx = vma->vm_private_data;
+	dev_info(LOG_DEV(ctx), "vm open %lx", vma->vm_pgoff);
+}
+
+void v2d_vm_close(struct vm_area_struct *vma)
+{
+	v2d_context_t *ctx = vma->vm_private_data;
+	dev_info(LOG_DEV(ctx), "vm close");
+}
+
+int v2d_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+	pgoff_t pgoff = vmf->pgoff;
+	struct page *page;
+	v2d_context_t *ctx = vma->vm_private_data;
+
+	dev_info(LOG_DEV(ctx), "vm fault %lx", pgoff);
+
+	if (pgoff >= ctx->canvas_pages_count)
+		return VM_FAULT_SIGBUS;
+	page = pfn_to_page(__pa(ctx->canvas_pages[pgoff].addr) >> PAGE_SHIFT);
+	if (!page) {
+		dev_err(LOG_DEV(ctx), "pfn_to_page");
+		return VM_FAULT_SIGBUS;
+	}
+	get_page(page);
+	vmf->page = page;
+	return 0;
+}
+
+static struct vm_operations_struct v2d_vm_ops = {
+	.open = v2d_vm_open,
+	.close = v2d_vm_close,
+	.fault = v2d_vm_fault
+};
+
+/* file */
 
 static int
 v2d_open(struct inode *inode, struct file *file)
@@ -72,12 +111,20 @@ v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 static int
 v2d_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	return -1;
+	if (!v2d_context_is_initialized(file->private_data))
+		return -EINVAL;
+	vma->vm_private_data = file->private_data;
+	vma->vm_ops = &v2d_vm_ops;
+	v2d_vm_open(vma);
+	return 0;
 }
 
 static ssize_t
 v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 {
+	if (!v2d_context_is_initialized(file->private_data))
+		return -EINVAL;
+	// TODO
 	return len;
 }
 
@@ -87,7 +134,7 @@ v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	return 0;
 }
 
-static struct file_operations pci_ops = {
+static struct file_operations v2d_file_ops = {
 	.owner		= THIS_MODULE,
 	.open 		= v2d_open,
 	.release 	= v2d_release,
@@ -97,7 +144,7 @@ static struct file_operations pci_ops = {
 	.fsync		= v2d_fsync
 };
 
-/* pci interface */
+/* pci */
 
 static int
 v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
@@ -109,13 +156,13 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	v2d_dev = v2d_devices_add(devices, max_devices, dev);
 	if (v2d_dev == NULL) {
-		dev_err(&(dev->dev), "v2d_devices_add\n");
+		dev_err(&(dev->dev), "v2d_devices_add");
 		goto error;
 	}
 	minor = v2d_dev->minor;
 
 	cdev = cdev_alloc();
-	cdev_init(cdev, &pci_ops);
+	cdev_init(cdev, &v2d_file_ops);
 	cdev->owner = THIS_MODULE;
 	if (cdev_add(cdev, MKDEV(MAJOR(devno), minor), 1) != 0) {
 		dev_err(&(dev->dev), "cdev_add\n");
@@ -126,17 +173,17 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	device = device_create(class, NULL, MKDEV(MAJOR(devno), minor), NULL,
 			"v2d%d", minor);
 	if (IS_ERR(device)) {
-		dev_err(&(dev->dev), "device_create\n");
+		dev_err(&(dev->dev), "device_create");
 		goto error_cdev;
 	}
 
 	if (pci_enable_device(dev)) {
-		dev_err(&(dev->dev), "pci_enable_device\n");
+		dev_err(&(dev->dev), "pci_enable_device");
 		goto error_cdev;
 	}
 
 	if (IS_ERR_VALUE(pci_request_regions(dev, "v2d"))) {
-		dev_err(&(dev->dev), "pci_request_regions\n");
+		dev_err(&(dev->dev), "pci_request_regions");
 		goto error_pci_enable;
 	}
 
@@ -146,7 +193,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	v2d_dev->control = pci_iomap(dev, 0, 4096);
 
-	dev_info(&(dev->dev), "Registered device %d", minor);
+	dev_info(&(dev->dev), "registered %d", minor);
 
 	return 0;
 
@@ -174,7 +221,7 @@ v2d_remove(struct pci_dev *dev)
 	v2d_devices_del(devices, max_devices, dev);
 }
 
-static struct pci_driver pci_driver = {
+static struct pci_driver v2d_pci_driver = {
 	.name 		= "v2d",
 	.id_table 	= v2d_ids,
 	.probe 		= v2d_probe,
@@ -206,7 +253,7 @@ v2d_init_module(void)
 		goto error_chrdev;
 	}
 
-	if (pci_register_driver(&pci_driver) < 0) {
+	if (pci_register_driver(&v2d_pci_driver) < 0) {
 		printk(KERN_ERR "v2d: pci_register_driver\n");
 		goto error_class;
 	}
@@ -228,7 +275,7 @@ v2d_exit_module(void)
 {
 	int i;
 
-	pci_unregister_driver(&pci_driver);
+	pci_unregister_driver(&v2d_pci_driver);
 	for (i=0; i< max_devices; i++) {
 		if (devices[i].dev != NULL) {
 			cdev_del(devices[i].cdev);

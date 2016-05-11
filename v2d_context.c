@@ -1,7 +1,5 @@
 #include "v2d_context.h"
 
-#define LOG_DEV(ctx) (&((ctx)->v2d_dev->dev->dev))
-
 /* helpers*/
 int
 dma_addr_mapping_initialize(dma_addr_mapping_t *dam, v2d_context_t *ctx)
@@ -35,7 +33,7 @@ v2d_context_create(v2d_device_t *v2d_dev)
 	ctx->v2d_dev = v2d_dev;
 	ctx->canvas_pages_count = 0;
 
-	dev_info(LOG_DEV(ctx), "Device context created");
+	dev_info(LOG_DEV(ctx), "context created");
 
 	return ctx;
 }
@@ -80,9 +78,7 @@ v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height)
 		page_table[i] = VINTAGE2D_PTE_VALID
 			| ctx->canvas_pages[i].dma_handle;
 
-	dev_info(LOG_DEV(ctx),
-			"Device context initialized (%d, %d)",
-			width, height);
+	dev_info(LOG_DEV(ctx), "context initialized (%d, %d)", width, height);
 
 	return 0;
 
@@ -105,6 +101,6 @@ v2d_context_discard(v2d_context_t *ctx)
 		kfree(ctx->canvas_pages);
 		ctx->canvas_pages_count = 0;
 	}
-	dev_info(LOG_DEV(ctx), "Device context discarded");
+	dev_info(LOG_DEV(ctx), "context discarded");
 	kfree(ctx);
 }

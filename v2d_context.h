@@ -11,6 +11,8 @@
 #define PTABLE_TOC_SIZE \
 	(MAX_CANVAS_SIZE * MAX_CANVAS_SIZE / VINTAGE2D_PAGE_SIZE)
 
+#define LOG_DEV(ctx) (&((ctx)->v2d_dev->dev->dev))
+
 typedef struct {
 	void *addr;
 	dma_addr_t dma_handle;
