@@ -11,6 +11,7 @@
 #include "v2d_ioctl.h"
 #include "v2d_device.h"
 #include "v2d_context.h"
+#include "v2d_backend.h"
 
 MODULE_LICENSE("GPL");
 
@@ -122,10 +123,20 @@ v2d_mmap(struct file *file, struct vm_area_struct *vma)
 static ssize_t
 v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 {
-	if (!v2d_context_is_initialized(file->private_data))
+	v2d_cmd_t cmd;
+	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
+	int i;
+
+	if (!v2d_context_is_initialized(ctx))
 		return -EINVAL;
-	// TODO
-	return len;
+
+	for (i = 0; i + 4 <= len; i = i + 4) {
+		if (copy_from_user(&cmd, buffer + i, 4))
+			return -EFAULT;
+		v2d_handle_cmd(ctx, cmd);
+	}
+	return i;
+
 }
 
 static int
@@ -157,7 +168,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	v2d_dev = v2d_devices_add(devices, max_devices, dev);
 	if (v2d_dev == NULL) {
 		dev_err(&(dev->dev), "v2d_devices_add");
-		goto error;
+		goto outadd;
 	}
 	minor = v2d_dev->minor;
 
@@ -166,7 +177,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	cdev->owner = THIS_MODULE;
 	if (cdev_add(cdev, MKDEV(MAJOR(devno), minor), 1) != 0) {
 		dev_err(&(dev->dev), "cdev_add\n");
-		goto error_pci_cdev;
+		goto outcdev;
 	}
 	v2d_dev->cdev = cdev;
 
@@ -174,17 +185,23 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 			"v2d%d", minor);
 	if (IS_ERR(device)) {
 		dev_err(&(dev->dev), "device_create");
-		goto error_cdev;
+		goto outdevice;
 	}
 
 	if (pci_enable_device(dev)) {
 		dev_err(&(dev->dev), "pci_enable_device");
-		goto error_cdev;
+		goto outdevice;
 	}
 
 	if (IS_ERR_VALUE(pci_request_regions(dev, "v2d"))) {
 		dev_err(&(dev->dev), "pci_request_regions");
-		goto error_pci_enable;
+		goto outregions;
+	}
+
+	if (request_irq(dev->irq, v2d_irq_handler, IRQF_SHARED, "v2d",
+				v2d_dev)) {
+		dev_err(&(dev->dev), "request_irq");
+		goto outirq;
 	}
 
 	pci_set_master(dev);
@@ -197,13 +214,15 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	return 0;
 
-error_pci_enable:
+outirq:
+	pci_release_regions(dev);
+outregions:
 	pci_disable_device(dev);
-error_cdev:
+outdevice:
 	cdev_del(cdev);
-error_pci_cdev:
+outcdev:
 	v2d_devices_del(devices, max_devices, dev);
-error:
+outadd:
 	return -1;
 }
 
@@ -213,6 +232,7 @@ v2d_remove(struct pci_dev *dev)
 	v2d_device_t *v2d_dev = v2d_devices_by_dev(devices, max_devices, dev);
 
 	pci_iounmap(dev, v2d_dev->control);
+	free_irq(dev->irq, v2d_dev);
 	pci_release_regions(dev);
 	pci_disable_device(dev);
 
@@ -237,12 +257,12 @@ v2d_init_module(void)
 			GFP_KERNEL);
 	if (!devices) {
 		printk(KERN_ERR "v2d: kmalloc\n");
-		goto error;
+		goto outalloc;
 	}
 
 	if (alloc_chrdev_region(&devno, 0, max_devices, "v2d") < 0) {
 		printk(KERN_ERR "v2d: alloc_chrdev_region\n");
-		goto error_kmalloc;
+		goto outchrdev;
 	}
 
 	v2d_devices_init(devices, max_devices, MINOR(devno));
@@ -250,23 +270,23 @@ v2d_init_module(void)
 	class = class_create(THIS_MODULE, "v2d");
 	if (IS_ERR(class)) {
 		printk(KERN_ERR "v2d: class_create\n");
-		goto error_chrdev;
+		goto outclass;
 	}
 
 	if (pci_register_driver(&v2d_pci_driver) < 0) {
 		printk(KERN_ERR "v2d: pci_register_driver\n");
-		goto error_class;
+		goto outregister;
 	}
 
 	return 0;
 
-error_class:
+outregister:
 	class_destroy(class);
-error_chrdev:
+outclass:
 	unregister_chrdev_region(devno, 1);
-error_kmalloc:
+outchrdev:
 	kfree(devices);
-error:
+outalloc:
 	return -1;
 }
 
