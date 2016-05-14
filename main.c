@@ -77,10 +77,16 @@ v2d_open(struct inode *inode, struct file *file)
 		devices,
 		max_devices,
 		iminor(inode));
-	v2d_context_t *ctx = v2d_context_create(dev);
-
+	v2d_context_t *ctx = kmalloc(sizeof(v2d_context_t), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
+
+	mutex_init(&ctx->mutex);
+	ctx->dev = dev;
+	ctx->canvas_pages_count = 0;
+
+	dev_info(LOG_DEV(ctx), "context created");
+
 	file->private_data = (void*) ctx;
 	return 0;
 }
@@ -88,7 +94,15 @@ v2d_open(struct inode *inode, struct file *file)
 static int
 v2d_release(struct inode *inode, struct file *file)
 {
-	v2d_context_discard(file->private_data);
+	v2d_context_t *ctx = file->private_data;
+
+	mutex_lock(&ctx->mutex);
+	v2d_context_tear_down_canvas(ctx);
+	ctx->canvas_pages_count = -1;
+	dev_info(LOG_DEV(ctx), "context discarded");
+	mutex_unlock(&ctx->mutex);
+
+	kfree(ctx);
 	return 0;
 }
 
@@ -97,25 +111,47 @@ v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	v2d_context_t *ctx = file->private_data;
 	struct v2d_ioctl_set_dimensions dim;
+	long ret;
 
-	switch (cmd) {
-	case V2D_IOCTL_SET_DIMENSIONS:
-		if (copy_from_user((void*) &dim, (void*) arg,
-				sizeof(struct v2d_ioctl_set_dimensions)))
-			return -EFAULT;
-		return v2d_context_initialize(ctx, dim.width, dim.height);
-	default:
+	if (cmd != V2D_IOCTL_SET_DIMENSIONS)
+		return -EINVAL;
+
+	if (copy_from_user((void*) &dim, (void*) arg,
+			sizeof(struct v2d_ioctl_set_dimensions)))
+		return -EFAULT;
+
+	mutex_lock(&ctx->mutex);
+	if (ctx->canvas_pages_count != 0
+			|| MIN_CANVAS_SIZE > dim.width
+			|| MIN_CANVAS_SIZE > dim.height
+			|| MAX_CANVAS_SIZE < dim.width
+			|| MAX_CANVAS_SIZE < dim.height) {
+		mutex_unlock(&ctx->mutex);
 		return -EINVAL;
 	}
+	ret = v2d_context_set_up_canvas(ctx, dim.width, dim.height);
+	if (ret == 0)
+		dev_info(LOG_DEV(ctx), "context initialized (%d, %d)",
+				dim.width, dim.height);
+	mutex_unlock(&ctx->mutex);
+
+	return ret;
 }
 
 static int
 v2d_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	if (!v2d_context_is_initialized(file->private_data))
+	v2d_context_t *ctx = file->private_data;
+
+	mutex_lock(&ctx->mutex);
+	if (ctx->canvas_pages_count <= 0) {
+		mutex_unlock(&ctx->mutex);
 		return -EINVAL;
+	}
 	vma->vm_private_data = file->private_data;
 	vma->vm_ops = &v2d_vm_ops;
+	mutex_unlock(&ctx->mutex);
+
 	v2d_vm_open(vma);
 	return 0;
 }
@@ -127,14 +163,21 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
 	int i;
 
-	if (!v2d_context_is_initialized(ctx))
+	mutex_lock(&ctx->mutex);
+	if (ctx->canvas_pages_count <= 0) {
+		mutex_unlock(&ctx->mutex);
 		return -EINVAL;
+	}
 
 	for (i = 0; i + 4 <= len; i = i + 4) {
-		if (copy_from_user(&cmd, buffer + i, 4))
+		if (copy_from_user(&cmd, buffer + i, 4)) {
+			mutex_unlock(&ctx->mutex);
 			return -EFAULT;
+		}
 		v2d_handle_cmd(ctx, cmd);
 	}
+	mutex_unlock(&ctx->mutex);
+
 	return i;
 
 }

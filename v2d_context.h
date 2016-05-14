@@ -1,6 +1,7 @@
 #ifndef V2D_CONTEXT_H
 #define V2D_CONTEXT_H
 
+#include <linux/mutex.h>
 #include <linux/pci.h>
 
 #include "vintage2d.h"
@@ -11,7 +12,7 @@
 #define PTABLE_TOC_SIZE \
 	(MAX_CANVAS_SIZE * MAX_CANVAS_SIZE / VINTAGE2D_PAGE_SIZE)
 
-#define LOG_DEV(ctx) (&((ctx)->v2d_dev->dev->dev))
+#define LOG_DEV(ctx) (&((ctx)->dev->dev->dev))
 
 typedef struct {
 	void *addr;
@@ -19,7 +20,8 @@ typedef struct {
 } dma_addr_mapping_t;
 
 typedef struct v2d_context {
-	v2d_device_t *v2d_dev;
+	struct mutex mutex;
+	v2d_device_t *dev;
 	uint16_t width;
 	uint16_t height;
 	int canvas_pages_count;
@@ -27,16 +29,11 @@ typedef struct v2d_context {
 	dma_addr_mapping_t *canvas_pages;
 } v2d_context_t;
 
-v2d_context_t *
-v2d_context_create(v2d_device_t *v2d_dev);
-
-bool
-v2d_context_is_initialized(v2d_context_t *ctx);
-
 int
-v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height);
+v2d_context_set_up_canvas(v2d_context_t *ctx, uint16_t width, uint16_t height);
 
 void
-v2d_context_discard(v2d_context_t *ctx);
+v2d_context_tear_down_canvas(v2d_context_t *ctx);
+
 #endif
 
