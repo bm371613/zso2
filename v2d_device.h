@@ -1,11 +1,13 @@
 #ifndef V2D_DEVICE_H
 #define V2D_DEVICE_H
 
+#include <linux/mutex.h>
 #include <linux/pci.h>
 
 struct v2d_context;
 
 typedef struct {
+	struct mutex mutex;
 	int minor;
 	struct pci_dev *dev;
 	struct cdev *cdev;

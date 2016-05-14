@@ -25,6 +25,10 @@ irqreturn_t v2d_irq_handler(int irq, void *dev) {
 }
 
 void v2d_handle_cmd(v2d_context_t *ctx, v2d_cmd_t command) {
+	v2d_device_t *dev = ctx->dev;
+
+	mutex_lock(&dev->mutex);
 	switch_ctx(ctx);
 	// TODO handle command
+	mutex_unlock(&dev->mutex);
 }
