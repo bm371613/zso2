@@ -8,11 +8,13 @@ struct v2d_context;
 
 typedef struct {
 	struct mutex mutex;
+
+	struct v2d_context *ctx;
+
 	int minor;
 	struct pci_dev *dev;
 	struct cdev *cdev;
 	void __iomem *control;
-	struct v2d_context *ctx;
 } v2d_device_t;
 
 void

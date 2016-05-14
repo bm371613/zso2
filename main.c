@@ -1,10 +1,10 @@
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/pci.h>
-#include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/pci.h>
 #include <asm/uaccess.h>
 
 #include "vintage2d.h"
@@ -82,6 +82,7 @@ v2d_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 
 	mutex_init(&ctx->mutex);
+	init_completion(&ctx->completion);
 	ctx->dev = dev;
 	ctx->canvas_pages_count = 0;
 
@@ -161,25 +162,36 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 {
 	v2d_cmd_t cmd;
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
+	v2d_device_t *dev;
 	int i;
+	int ret;
 
 	mutex_lock(&ctx->mutex);
+	dev = ctx->dev;
+	mutex_lock(&dev->mutex);
+
+	if (dev->dev == NULL) {
+		ret = -ENODEV;
+		goto out;
+	}
 	if (ctx->canvas_pages_count <= 0) {
-		mutex_unlock(&ctx->mutex);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	for (i = 0; i + 4 <= len; i = i + 4) {
 		if (copy_from_user(&cmd, buffer + i, 4)) {
-			mutex_unlock(&ctx->mutex);
-			return -EFAULT;
+			ret = -EFAULT;
+			goto out;
 		}
-		v2d_handle_cmd(ctx, cmd);
+		handle_cmd(ctx, cmd);
 	}
+	ret = i;
+
+out:
+	mutex_unlock(&dev->mutex);
 	mutex_unlock(&ctx->mutex);
-
-	return i;
-
+	return ret;
 }
 
 static int
@@ -248,8 +260,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		goto outiomap;
 	}
 
-	if (request_irq(dev->irq, v2d_irq_handler, IRQF_SHARED, "v2d",
-				v2d_dev)) {
+	if (request_irq(dev->irq, irq_handler, IRQF_SHARED, "v2d", v2d_dev)) {
 		dev_err(&(dev->dev), "request_irq");
 		goto outirq;
 	}
@@ -283,6 +294,8 @@ v2d_remove(struct pci_dev *dev)
 {
 	v2d_device_t *v2d_dev = v2d_devices_by_dev(devices, max_devices, dev);
 
+	mutex_lock(&v2d_dev->mutex);
+	tear_down_ctx(v2d_dev);
 	free_irq(dev->irq, v2d_dev);
 	pci_iounmap(dev, v2d_dev->control);
 	pci_release_regions(dev);
@@ -290,6 +303,7 @@ v2d_remove(struct pci_dev *dev)
 	device_destroy(class, MKDEV(MAJOR(devno), v2d_dev->minor));
 	cdev_del(v2d_dev->cdev);
 	v2d_devices_del(devices, max_devices, dev);
+	mutex_unlock(&v2d_dev->mutex);
 }
 
 static struct pci_driver v2d_pci_driver = {

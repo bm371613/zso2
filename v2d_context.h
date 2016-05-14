@@ -1,6 +1,7 @@
 #ifndef V2D_CONTEXT_H
 #define V2D_CONTEXT_H
 
+#include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
 
@@ -21,7 +22,10 @@ typedef struct {
 
 typedef struct v2d_context {
 	struct mutex mutex;
+	struct completion completion;
+
 	v2d_device_t *dev;
+
 	uint16_t width;
 	uint16_t height;
 	int canvas_pages_count;
