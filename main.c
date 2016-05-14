@@ -113,7 +113,7 @@ v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	long ret;
 
 	if (cmd != V2D_IOCTL_SET_DIMENSIONS)
-		return -EINVAL;
+		return -ENOTTY;
 
 	if (copy_from_user((void*) &dim, (void*) arg,
 			sizeof(struct v2d_ioctl_set_dimensions)))
@@ -162,6 +162,9 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
 	v2d_device_t *dev = ctx->dev;
 	int i, ret;
+
+	if (len % 4)
+		return -1;
 
 	mutex_lock(&dev->mutex);
 
