@@ -18,7 +18,7 @@ typedef struct {
 	dma_addr_t dma_handle;
 } dma_addr_mapping_t;
 
-typedef struct {
+typedef struct v2d_context {
 	v2d_device_t *v2d_dev;
 	uint16_t width;
 	uint16_t height;

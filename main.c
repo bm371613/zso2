@@ -170,6 +170,7 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		dev_err(&(dev->dev), "v2d_devices_add");
 		goto outadd;
 	}
+	v2d_dev->ctx = NULL;
 	minor = v2d_dev->minor;
 
 	cdev = cdev_alloc();
@@ -190,12 +191,18 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	if (pci_enable_device(dev)) {
 		dev_err(&(dev->dev), "pci_enable_device");
-		goto outdevice;
+		goto outenable;
 	}
 
 	if (IS_ERR_VALUE(pci_request_regions(dev, "v2d"))) {
 		dev_err(&(dev->dev), "pci_request_regions");
 		goto outregions;
+	}
+
+	v2d_dev->control = pci_iomap(dev, 0, 4096);
+	if (!v2d_dev->control) {
+		dev_err(&(dev->dev), "pci_iomap");
+		goto outiomap;
 	}
 
 	if (request_irq(dev->irq, v2d_irq_handler, IRQF_SHARED, "v2d",
@@ -208,16 +215,18 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	pci_set_dma_mask(dev, DMA_BIT_MASK(32));
 	pci_set_consistent_dma_mask(dev, DMA_BIT_MASK(32));
 
-	v2d_dev->control = pci_iomap(dev, 0, 4096);
-
 	dev_info(&(dev->dev), "registered %d", minor);
 
 	return 0;
 
 outirq:
+	pci_iounmap(dev, v2d_dev->control);
+outiomap:
 	pci_release_regions(dev);
 outregions:
 	pci_disable_device(dev);
+outenable:
+	device_destroy(class, MKDEV(MAJOR(devno), v2d_dev->minor));
 outdevice:
 	cdev_del(cdev);
 outcdev:
@@ -231,11 +240,10 @@ v2d_remove(struct pci_dev *dev)
 {
 	v2d_device_t *v2d_dev = v2d_devices_by_dev(devices, max_devices, dev);
 
-	pci_iounmap(dev, v2d_dev->control);
 	free_irq(dev->irq, v2d_dev);
+	pci_iounmap(dev, v2d_dev->control);
 	pci_release_regions(dev);
 	pci_disable_device(dev);
-
 	device_destroy(class, MKDEV(MAJOR(devno), v2d_dev->minor));
 	cdev_del(v2d_dev->cdev);
 	v2d_devices_del(devices, max_devices, dev);
