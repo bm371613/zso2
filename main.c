@@ -162,12 +162,9 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 {
 	v2d_cmd_t cmd;
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
-	v2d_device_t *dev;
-	int i;
-	int ret;
+	v2d_device_t *dev = ctx->dev;
+	int i, ret;
 
-	mutex_lock(&ctx->mutex);
-	dev = ctx->dev;
 	mutex_lock(&dev->mutex);
 
 	if (dev->dev == NULL) {
@@ -184,13 +181,14 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 			ret = -EFAULT;
 			goto out;
 		}
-		handle_cmd(ctx, cmd);
+		ret = handle_cmd(ctx, cmd);
+		if (ret)
+			goto out;
 	}
 	ret = i;
 
 out:
 	mutex_unlock(&dev->mutex);
-	mutex_unlock(&ctx->mutex);
 	return ret;
 }
 

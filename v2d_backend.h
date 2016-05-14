@@ -9,7 +9,7 @@ typedef unsigned v2d_cmd_t;
 
 void tear_down_ctx(v2d_device_t *dev);
 
-void handle_cmd(v2d_context_t *ctx, v2d_cmd_t command);
+int handle_cmd(v2d_context_t *ctx, v2d_cmd_t cmd);
 
 irqreturn_t irq_handler(int irq, void *dev);
 

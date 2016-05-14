@@ -31,6 +31,9 @@ typedef struct v2d_context {
 	int canvas_pages_count;
 	dma_addr_mapping_t canvas_page_table;
 	dma_addr_mapping_t *canvas_pages;
+
+	uint16_t src_x, src_y, dst_x, dst_y;
+	unsigned char color;
 } v2d_context_t;
 
 int
