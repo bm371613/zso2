@@ -48,8 +48,6 @@ int v2d_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct page *page;
 	v2d_context_t *ctx = vma->vm_private_data;
 
-	dev_info(LOG_DEV(ctx), "vm fault %lx", pgoff);
-
 	if (pgoff >= ctx->canvas_pages_count)
 		return VM_FAULT_SIGBUS;
 	page = pfn_to_page(__pa(ctx->canvas_pages[pgoff].addr) >> PAGE_SHIFT);

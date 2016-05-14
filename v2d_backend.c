@@ -76,9 +76,7 @@ int handle_cmd(v2d_context_t *ctx, v2d_cmd_t cmd) {
 					V2D_CMD_WIDTH(cmd),
 					V2D_CMD_HEIGHT(cmd),
 					1));
-		printk("cmd\n");
 		wait_for_completion(&ctx->completion);
-		printk("cmd end!\n");
 		break;
 	case V2D_CMD_TYPE_DO_BLIT:
 		if (ctx != current_ctx) {
@@ -96,9 +94,7 @@ int handle_cmd(v2d_context_t *ctx, v2d_cmd_t cmd) {
 					V2D_CMD_WIDTH(cmd),
 					V2D_CMD_HEIGHT(cmd),
 					1));
-		printk("cmd\n");
 		wait_for_completion(&ctx->completion);
-		printk("cmd end!\n");
 		break;
 	default:
 		return -EINVAL;
@@ -111,13 +107,13 @@ irqreturn_t irq_handler(int irq, void *dev) {
 	v2d_context_t *ctx = v2d_dev->ctx;
 	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
 
-	printk("irq %p\n", ctx);
-
 	if (ctx)
 		complete(&ctx->completion);
+	else
+		printk("v2d: irq without context\n");
 
-	if (intr & VINTAGE2D_INTR_NOTIFY)
-		printk("v2d: irq notify\n");
+	if (!(intr & VINTAGE2D_INTR_NOTIFY))
+		printk("v2d: irq not notify\n");
 
 	if (intr & VINTAGE2D_INTR_INVALID_CMD)
 		printk("v2d: irq invalid command\n");
