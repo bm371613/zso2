@@ -1,21 +1,7 @@
 #ifndef V2D_DEVICE_H
 #define V2D_DEVICE_H
 
-#include <linux/mutex.h>
-#include <linux/pci.h>
-
-struct v2d_context;
-
-typedef struct {
-	struct mutex mutex;
-
-	struct v2d_context *ctx;
-
-	int minor;
-	struct pci_dev *dev;
-	struct cdev *cdev;
-	void __iomem *control;
-} v2d_device_t;
+#include "common.h"
 
 void
 v2d_devices_init(v2d_device_t v2d_devices[], int size, int first_minor);

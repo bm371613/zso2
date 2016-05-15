@@ -2,16 +2,15 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/init.h>
+#include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <asm/uaccess.h>
 
-#include "vintage2d.h"
-#include "v2d_ioctl.h"
+#include "common.h"
 #include "v2d_device.h"
 #include "v2d_context.h"
-#include "v2d_backend.h"
 
 MODULE_LICENSE("GPL");
 
@@ -28,6 +27,131 @@ MODULE_DEVICE_TABLE(pci, v2d_ids);
 static dev_t devno;
 static struct class *class;
 static v2d_device_t *devices;
+
+/* helpers */
+inline unsigned
+get_registry(v2d_device_t *dev, unsigned offset)
+{
+	return *((unsigned *) (dev->control + offset));
+}
+
+inline void
+set_registry(v2d_device_t *dev, unsigned offset, unsigned value)
+{
+	*((unsigned *) (dev->control + offset)) = value;
+}
+
+
+void
+device_prepare(v2d_device_t *dev)
+{
+	dma_addr_t cmds = dev->cmds.dma_handle;
+
+	set_registry(dev, VINTAGE2D_RESET, VINTAGE2D_RESET_DRAW
+			| VINTAGE2D_RESET_FIFO | VINTAGE2D_RESET_TLB);
+	set_registry(dev, VINTAGE2D_INTR, VINTAGE2D_INTR_NOTIFY
+			| VINTAGE2D_INTR_INVALID_CMD
+			| VINTAGE2D_INTR_PAGE_FAULT
+			| VINTAGE2D_INTR_CANVAS_OVERFLOW
+			| VINTAGE2D_INTR_FIFO_OVERFLOW);
+
+
+	DEV_CMDS(dev)[MAX_CMDS - 1] = (cmds & (0xfffffffc)) | 2;
+	set_registry(dev, VINTAGE2D_CMD_READ_PTR, (unsigned) cmds);
+	set_registry(dev, VINTAGE2D_CMD_WRITE_PTR, (unsigned) cmds);
+
+	set_registry(dev, VINTAGE2D_INTR_ENABLE, VINTAGE2D_INTR_NOTIFY
+		| VINTAGE2D_INTR_INVALID_CMD
+		| VINTAGE2D_INTR_PAGE_FAULT
+		| VINTAGE2D_INTR_CANVAS_OVERFLOW
+		| VINTAGE2D_INTR_FIFO_OVERFLOW);
+	set_registry(dev, VINTAGE2D_ENABLE, VINTAGE2D_ENABLE_DRAW
+		| VINTAGE2D_ENABLE_FETCH_CMD);
+}
+
+void
+device_reset(v2d_device_t *dev)
+{
+	set_registry(dev, VINTAGE2D_ENABLE, 0);
+	set_registry(dev, VINTAGE2D_INTR_ENABLE, 0);
+	set_registry(dev, VINTAGE2D_RESET, VINTAGE2D_RESET_DRAW
+			| VINTAGE2D_RESET_FIFO | VINTAGE2D_RESET_TLB);
+	set_registry(dev, VINTAGE2D_INTR, VINTAGE2D_INTR_NOTIFY
+			| VINTAGE2D_INTR_INVALID_CMD
+			| VINTAGE2D_INTR_PAGE_FAULT
+			| VINTAGE2D_INTR_CANVAS_OVERFLOW
+			| VINTAGE2D_INTR_FIFO_OVERFLOW);
+}
+
+void
+send_encoded_cmd(v2d_device_t *dev, unsigned cmd)
+{
+	// TODO wait for place in queue and write to it
+}
+
+void
+set_context(v2d_context_t *ctx)
+{
+	v2d_device_t *dev = ctx->dev;
+	set_registry(dev, VINTAGE2D_RESET, VINTAGE2D_RESET_DRAW
+			| VINTAGE2D_RESET_FIFO | VINTAGE2D_RESET_TLB);
+	send_encoded_cmd(dev, VINTAGE2D_CMD_CANVAS_PT(
+			ctx->canvas_page_table.dma_handle, 1));
+	send_encoded_cmd(dev, VINTAGE2D_CMD_CANVAS_DIMS(
+			ctx->width, ctx->height, 1));
+	dev->ctx = ctx;
+}
+
+bool
+validate_cmd(v2d_context_t *ctx, v2d_cmd_t cmd)
+{
+	// TODO
+	return true;
+}
+
+void
+send_cmd(v2d_device_t *dev, v2d_cmd_t cmd)
+{
+	// TODO
+}
+
+void
+sync_device(v2d_device_t *dev)
+{
+	// TODO
+	dev->ctx = NULL;
+}
+
+irqreturn_t
+irq_handler(int irq, void *dev)
+{
+	v2d_device_t *v2d_dev = dev;
+	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
+
+
+	if (intr & VINTAGE2D_INTR_NOTIFY)
+		printk("v2d: irq notify\n");
+
+	if (intr & VINTAGE2D_INTR_INVALID_CMD)
+		printk("v2d: irq invalid command\n");
+
+	if (intr & VINTAGE2D_INTR_PAGE_FAULT)
+		printk("v2d: irq page fault\n");
+
+	if (intr & VINTAGE2D_INTR_CANVAS_OVERFLOW)
+		printk("v2d: irq canvas overflow\n");
+
+	if (intr & VINTAGE2D_INTR_FIFO_OVERFLOW)
+		printk("v2d: irq fifo overflow\n");
+
+	set_registry(dev, VINTAGE2D_INTR, VINTAGE2D_INTR_NOTIFY
+			| VINTAGE2D_INTR_INVALID_CMD
+			| VINTAGE2D_INTR_PAGE_FAULT
+			| VINTAGE2D_INTR_CANVAS_OVERFLOW
+			| VINTAGE2D_INTR_FIFO_OVERFLOW);
+
+	return IRQ_HANDLED;
+}
 
 /* vm */
 void v2d_vm_open(struct vm_area_struct *vma)
@@ -160,7 +284,7 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 	v2d_cmd_t cmd;
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
 	v2d_device_t *dev = ctx->dev;
-	int i, ret = 0;
+	int i;
 
 	if (len % 4)
 		return -1;
@@ -177,7 +301,11 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 				mutex_unlock(&ctx->mutex);
 				return -EINVAL;
 			}
-			ret = handle_prepare_cmd(ctx, cmd);
+			if (!validate_cmd(ctx, cmd)) {
+				mutex_unlock(&ctx->mutex);
+				return -EINVAL;
+			}
+			ctx->history[ctx->history_it++] = cmd;
 			mutex_unlock(&ctx->mutex);
 			break;
 		case V2D_CMD_TYPE_DO_FILL:
@@ -191,14 +319,24 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 				mutex_unlock(&dev->mutex);
 				return -ENODEV;
 			}
-			ret = handle_do_cmd(ctx, cmd);
+			if (!validate_cmd(ctx, cmd)) {
+				mutex_unlock(&dev->mutex);
+				return -EINVAL;
+			}
+			if (dev->ctx != ctx) {
+				if (dev->ctx != NULL)
+					sync_device(dev);
+				set_context(ctx);
+			}
+			send_cmd(dev, ctx->history[0]);
+			send_cmd(dev, ctx->history[1]);
+			send_cmd(dev, cmd);
+			ctx->history[ctx->history_it++] = cmd;
 			mutex_unlock(&dev->mutex);
 			break;
 		default:
 			return -EINVAL;
 		}
-		if (ret)
-			return ret;
 	}
 	return i;
 }
@@ -221,7 +359,7 @@ v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 		goto out;
 	}
 
-	sync_ctx(ctx);
+	sync_device(dev);
 out:
 	mutex_unlock(&dev->mutex);
 	return ret;
@@ -292,6 +430,11 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		goto outirq;
 	}
 
+	if (dma_addr_mapping_initialize(&v2d_dev->cmds, v2d_dev)) {
+		dev_err(&(dev->dev), "dma_addr_mapping_initialize");
+		goto outcmds;
+	}
+
 	pci_set_master(dev);
 	pci_set_dma_mask(dev, DMA_BIT_MASK(32));
 	pci_set_consistent_dma_mask(dev, DMA_BIT_MASK(32));
@@ -302,6 +445,8 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	return 0;
 
+outcmds:
+	free_irq(dev->irq, v2d_dev);
 outirq:
 	pci_iounmap(dev, v2d_dev->control);
 outiomap:
@@ -324,6 +469,8 @@ v2d_remove(struct pci_dev *dev)
 	v2d_device_t *v2d_dev = v2d_devices_by_dev(devices, max_devices, dev);
 
 	mutex_lock(&v2d_dev->mutex);
+	device_reset(v2d_dev);
+	dma_addr_mapping_finalize(&v2d_dev->cmds, v2d_dev);
 	free_irq(dev->irq, v2d_dev);
 	pci_iounmap(dev, v2d_dev->control);
 	pci_release_regions(dev);
@@ -386,17 +533,7 @@ outalloc:
 static void
 v2d_exit_module(void)
 {
-	int i;
-
 	pci_unregister_driver(&v2d_pci_driver);
-	for (i=0; i< max_devices; i++) {
-		mutex_lock(&devices[i].mutex);
-		if (devices[i].dev != NULL) {
-			device_reset(&devices[i]);
-			cdev_del(devices[i].cdev);
-		}
-		mutex_unlock(&devices[i].mutex);
-	}
 	class_destroy(class);
 	unregister_chrdev_region(devno, max_devices);
 	kfree(devices);
