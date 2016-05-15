@@ -433,7 +433,8 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 			send_cmd(dev, ctx->history[0]);
 			send_cmd(dev, ctx->history[1]);
 			send_cmd(dev, cmd);
-			ctx->history[ctx->history_it++] = cmd;
+			ctx->history[ctx->history_it] = cmd;
+			ctx->history_it = (ctx->history_it + 1) % 2;
 			mutex_unlock(&dev->mutex);
 			break;
 		default:
