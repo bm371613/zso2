@@ -318,13 +318,17 @@ static int
 v2d_release(struct inode *inode, struct file *file)
 {
 	v2d_context_t *ctx = file->private_data;
+	v2d_device_t *dev = ctx->dev;
 
-	// FIXME if current ctx, sync
+	mutex_lock(&dev->mutex);
 	mutex_lock(&ctx->mutex);
+	if (dev->ctx == ctx)
+		sync_device(dev);
 	v2d_context_finalize(ctx);
 	ctx->canvas_pages_count = -1;
 	dev_info(LOG_DEV(ctx), "context discarded");
 	mutex_unlock(&ctx->mutex);
+	mutex_unlock(&dev->mutex);
 
 	kfree(ctx);
 	return 0;
@@ -413,17 +417,20 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 			break;
 		case V2D_CMD_TYPE_DO_FILL:
 		case V2D_CMD_TYPE_DO_BLIT:
-			// FIXME we need ctx->mutex too
 			mutex_lock(&dev->mutex);
+			mutex_lock(&ctx->mutex);
 			if (ctx->canvas_pages_count <= 0) {
+				mutex_unlock(&ctx->mutex);
 				mutex_unlock(&dev->mutex);
 				return -EINVAL;
 			}
 			if (dev->dev == NULL) {
+				mutex_unlock(&ctx->mutex);
 				mutex_unlock(&dev->mutex);
 				return -ENODEV;
 			}
 			if (!validate_cmd(ctx, cmd)) {
+				mutex_unlock(&ctx->mutex);
 				mutex_unlock(&dev->mutex);
 				return -EINVAL;
 			}
@@ -437,6 +444,7 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 			send_cmd(dev, cmd);
 			ctx->history[ctx->history_it] = cmd;
 			ctx->history_it = (ctx->history_it + 1) % 2;
+			mutex_unlock(&ctx->mutex);
 			mutex_unlock(&dev->mutex);
 			break;
 		default:
