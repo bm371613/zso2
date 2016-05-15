@@ -128,7 +128,6 @@ irq_handler(int irq, void *dev)
 	v2d_device_t *v2d_dev = dev;
 	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
 
-
 	if (intr & VINTAGE2D_INTR_NOTIFY)
 		printk("v2d: irq notify\n");
 
