@@ -115,7 +115,61 @@ set_context(v2d_context_t *ctx)
 bool
 validate_cmd(v2d_context_t *ctx, v2d_cmd_t cmd)
 {
-	// FIXME
+	unsigned color = V2D_CMD_COLOR(cmd),
+		x = V2D_CMD_POS_X(cmd), y = V2D_CMD_POS_Y(cmd),
+		width = V2D_CMD_WIDTH(cmd), height = V2D_CMD_HEIGHT(cmd);
+	int i, src=-1, dst=-1, col=-1;
+
+	for (i = 0; i < 2; ++i)
+		switch (V2D_CMD_TYPE(ctx->history[i])) {
+		case V2D_CMD_TYPE_SRC_POS:
+			src = i;
+			break;
+		case V2D_CMD_TYPE_DST_POS:
+			dst = i;
+			break;
+		case V2D_CMD_TYPE_FILL_COLOR:
+			col = i;
+			break;
+		}
+
+
+#define assert(cond) if(!(cond)) {return false;};
+#define H(i) (ctx->history[i])
+	switch (V2D_CMD_TYPE(cmd)) {
+	case V2D_CMD_TYPE_SRC_POS:
+		assert(cmd == V2D_CMD_SRC_POS(x, y));
+		assert(x < ctx->width && y < ctx->height);
+		break;
+	case V2D_CMD_TYPE_DST_POS:
+		assert(cmd == V2D_CMD_DST_POS(x, y));
+		assert(x < ctx->width && y < ctx->height);
+		break;
+	case V2D_CMD_TYPE_FILL_COLOR:
+		assert(cmd == V2D_CMD_FILL_COLOR(color));
+		break;
+	case V2D_CMD_TYPE_DO_FILL:
+		assert(cmd == V2D_CMD_DO_FILL(width, height));
+		assert(dst >= 0 && col >= 0);
+		assert(V2D_CMD_POS_X(H(dst)) + width <= ctx->width
+				&& V2D_CMD_POS_Y(H(dst)) + height
+				<= ctx->height);
+		break;
+	case V2D_CMD_TYPE_DO_BLIT:
+		assert(cmd == V2D_CMD_DO_BLIT(width, height));
+		assert(dst >= 0 && src >= 0);
+		assert(V2D_CMD_POS_X(H(dst)) + width <= ctx->width
+				&& V2D_CMD_POS_Y(H(dst)) + height
+				<= ctx->height);
+		assert(V2D_CMD_POS_X(H(src)) + width <= ctx->width
+				&& V2D_CMD_POS_Y(H(src)) + height
+				<= ctx->height);
+		break;
+	default:
+		return false;
+	}
+#undef assert
+#undef H
 	return true;
 }
 
