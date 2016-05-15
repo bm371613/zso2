@@ -319,6 +319,7 @@ v2d_release(struct inode *inode, struct file *file)
 {
 	v2d_context_t *ctx = file->private_data;
 
+	// FIXME if current ctx, sync
 	mutex_lock(&ctx->mutex);
 	v2d_context_finalize(ctx);
 	ctx->canvas_pages_count = -1;
@@ -412,6 +413,7 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 			break;
 		case V2D_CMD_TYPE_DO_FILL:
 		case V2D_CMD_TYPE_DO_BLIT:
+			// FIXME we need ctx->mutex too
 			mutex_lock(&dev->mutex);
 			if (ctx->canvas_pages_count <= 0) {
 				mutex_unlock(&dev->mutex);
