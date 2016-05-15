@@ -1,7 +1,6 @@
 #ifndef V2D_CONTEXT_H
 #define V2D_CONTEXT_H
 
-#include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
 
@@ -15,6 +14,8 @@
 
 #define LOG_DEV(ctx) (&((ctx)->dev->dev->dev))
 
+typedef unsigned v2d_cmd_t;
+
 typedef struct {
 	void *addr;
 	dma_addr_t dma_handle;
@@ -22,7 +23,6 @@ typedef struct {
 
 typedef struct v2d_context {
 	struct mutex mutex;
-	struct completion completion;
 
 	v2d_device_t *dev;
 
@@ -32,15 +32,17 @@ typedef struct v2d_context {
 	dma_addr_mapping_t canvas_page_table;
 	dma_addr_mapping_t *canvas_pages;
 
-	uint16_t src_x, src_y, dst_x, dst_y;
-	unsigned char color;
+	v2d_cmd_t history[2];
+	bool history_it;
+
+	int counter;
 } v2d_context_t;
 
 int
-v2d_context_set_up_canvas(v2d_context_t *ctx, uint16_t width, uint16_t height);
+v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height);
 
 void
-v2d_context_tear_down_canvas(v2d_context_t *ctx);
+v2d_context_finalize(v2d_context_t *ctx);
 
 #endif
 

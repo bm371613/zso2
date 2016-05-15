@@ -80,7 +80,6 @@ v2d_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 
 	mutex_init(&ctx->mutex);
-	init_completion(&ctx->completion);
 	ctx->dev = dev;
 	ctx->canvas_pages_count = 0;
 
@@ -96,7 +95,7 @@ v2d_release(struct inode *inode, struct file *file)
 	v2d_context_t *ctx = file->private_data;
 
 	mutex_lock(&ctx->mutex);
-	v2d_context_tear_down_canvas(ctx);
+	v2d_context_finalize(ctx);
 	ctx->canvas_pages_count = -1;
 	dev_info(LOG_DEV(ctx), "context discarded");
 	mutex_unlock(&ctx->mutex);
@@ -128,7 +127,7 @@ v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		mutex_unlock(&ctx->mutex);
 		return -EINVAL;
 	}
-	ret = v2d_context_set_up_canvas(ctx, dim.width, dim.height);
+	ret = v2d_context_initialize(ctx, dim.width, dim.height);
 	if (ret == 0)
 		dev_info(LOG_DEV(ctx), "context initialized (%d, %d)",
 				dim.width, dim.height);
@@ -161,10 +160,55 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 	v2d_cmd_t cmd;
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
 	v2d_device_t *dev = ctx->dev;
-	int i, ret;
+	int i, ret = 0;
 
 	if (len % 4)
 		return -1;
+
+	for (i = 0; i + 4 <= len; i = i + 4) {
+		if (copy_from_user(&cmd, buffer + i, 4))
+			return -EFAULT;
+		switch (V2D_CMD_TYPE(cmd)) {
+		case V2D_CMD_TYPE_SRC_POS:
+		case V2D_CMD_TYPE_DST_POS:
+		case V2D_CMD_TYPE_FILL_COLOR:
+			mutex_lock(&ctx->mutex);
+			if (ctx->canvas_pages_count <= 0) {
+				mutex_unlock(&ctx->mutex);
+				return -EINVAL;
+			}
+			ret = handle_prepare_cmd(ctx, cmd);
+			mutex_unlock(&ctx->mutex);
+			break;
+		case V2D_CMD_TYPE_DO_FILL:
+		case V2D_CMD_TYPE_DO_BLIT:
+			mutex_lock(&dev->mutex);
+			if (ctx->canvas_pages_count <= 0) {
+				mutex_unlock(&dev->mutex);
+				return -EINVAL;
+			}
+			if (dev->dev == NULL) {
+				mutex_unlock(&dev->mutex);
+				return -ENODEV;
+			}
+			ret = handle_do_cmd(ctx, cmd);
+			mutex_unlock(&dev->mutex);
+			break;
+		default:
+			return -EINVAL;
+		}
+		if (ret)
+			return ret;
+	}
+	return i;
+}
+
+static int
+v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+{
+	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
+	v2d_device_t *dev = ctx->dev;
+	int ret = 0;
 
 	mutex_lock(&dev->mutex);
 
@@ -177,26 +221,10 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 		goto out;
 	}
 
-	for (i = 0; i + 4 <= len; i = i + 4) {
-		if (copy_from_user(&cmd, buffer + i, 4)) {
-			ret = -EFAULT;
-			goto out;
-		}
-		ret = handle_cmd(ctx, cmd);
-		if (ret)
-			goto out;
-	}
-	ret = i;
-
+	sync_ctx(ctx);
 out:
 	mutex_unlock(&dev->mutex);
 	return ret;
-}
-
-static int
-v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
-{
-	return 0;
 }
 
 static struct file_operations v2d_file_ops = {
@@ -268,6 +296,8 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	pci_set_dma_mask(dev, DMA_BIT_MASK(32));
 	pci_set_consistent_dma_mask(dev, DMA_BIT_MASK(32));
 
+	device_prepare(v2d_dev);
+
 	dev_info(&(dev->dev), "registered %d", minor);
 
 	return 0;
@@ -294,7 +324,6 @@ v2d_remove(struct pci_dev *dev)
 	v2d_device_t *v2d_dev = v2d_devices_by_dev(devices, max_devices, dev);
 
 	mutex_lock(&v2d_dev->mutex);
-	tear_down_ctx(v2d_dev);
 	free_irq(dev->irq, v2d_dev);
 	pci_iounmap(dev, v2d_dev->control);
 	pci_release_regions(dev);
@@ -361,9 +390,12 @@ v2d_exit_module(void)
 
 	pci_unregister_driver(&v2d_pci_driver);
 	for (i=0; i< max_devices; i++) {
+		mutex_lock(&devices[i].mutex);
 		if (devices[i].dev != NULL) {
+			device_reset(&devices[i]);
 			cdev_del(devices[i].cdev);
 		}
+		mutex_unlock(&devices[i].mutex);
 	}
 	class_destroy(class);
 	unregister_chrdev_region(devno, max_devices);
