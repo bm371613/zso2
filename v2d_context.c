@@ -9,6 +9,7 @@ v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height)
 	ctx->width = width;
 	ctx->height = height;
 	ctx->history[0] = ctx->history[1] = 0;
+	ctx->history_it = 0;
 
 	ctx->canvas_pages_count = DIV_ROUND_UP(width * height,
 			VINTAGE2D_PAGE_SIZE);

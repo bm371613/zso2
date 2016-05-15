@@ -14,7 +14,8 @@
 #define PTABLE_TOC_SIZE \
 	(MAX_CANVAS_SIZE * MAX_CANVAS_SIZE / VINTAGE2D_PAGE_SIZE)
 
-#define DEV_CMDS(v2d_dev) ((v2d_cmd_t*) v2d_dev->cmds.addr)
+#define DEV_CMDS_ADDR(v2d_dev) ((unsigned*) v2d_dev->cmds.addr)
+#define DEV_CMDS_DMA(v2d_dev) ((unsigned) v2d_dev->cmds.dma_handle)
 #define LOG_DEV(ctx) (&((ctx)->dev->dev->dev))
 
 typedef unsigned v2d_cmd_t;
@@ -51,7 +52,7 @@ typedef struct v2d_context {
 	dma_addr_mapping_t *canvas_pages;
 
 	v2d_cmd_t history[2];
-	bool history_it;
+	int history_it;
 } v2d_context_t;
 
 int

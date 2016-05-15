@@ -32,20 +32,20 @@ static v2d_device_t *devices;
 inline unsigned
 get_registry(v2d_device_t *dev, unsigned offset)
 {
-	return *((unsigned *) (dev->control + offset));
+	return ioread32(dev->control + offset);
 }
 
 inline void
 set_registry(v2d_device_t *dev, unsigned offset, unsigned value)
 {
-	*((unsigned *) (dev->control + offset)) = value;
+	iowrite32(value, dev->control + offset);
 }
 
 
 void
 device_prepare(v2d_device_t *dev)
 {
-	dma_addr_t cmds = dev->cmds.dma_handle;
+	unsigned cmds = DEV_CMDS_DMA(dev);
 
 	set_registry(dev, VINTAGE2D_RESET, VINTAGE2D_RESET_DRAW
 			| VINTAGE2D_RESET_FIFO | VINTAGE2D_RESET_TLB);
@@ -56,7 +56,7 @@ device_prepare(v2d_device_t *dev)
 			| VINTAGE2D_INTR_FIFO_OVERFLOW);
 
 
-	DEV_CMDS(dev)[MAX_CMDS - 1] = (cmds & (0xfffffffc)) | 2;
+	DEV_CMDS_ADDR(dev)[MAX_CMDS - 1] = (cmds & (0xfffffffc)) | 2;
 	set_registry(dev, VINTAGE2D_CMD_READ_PTR, (unsigned) cmds);
 	set_registry(dev, VINTAGE2D_CMD_WRITE_PTR, (unsigned) cmds);
 
@@ -86,7 +86,17 @@ device_reset(v2d_device_t *dev)
 void
 send_encoded_cmd(v2d_device_t *dev, unsigned cmd)
 {
-	// TODO wait for place in queue and write to it
+	// TODO wait for place in queue
+	unsigned pos = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
+		- DEV_CMDS_DMA(dev)) / 4;
+
+	DEV_CMDS_ADDR(dev)[pos] = cmd;
+	pos++;
+	if (pos == MAX_CMDS - 1)
+		pos = 0;
+
+	set_registry(dev, VINTAGE2D_CMD_WRITE_PTR,
+			DEV_CMDS_DMA(dev) + 4 * pos);
 }
 
 void
@@ -105,20 +115,58 @@ set_context(v2d_context_t *ctx)
 bool
 validate_cmd(v2d_context_t *ctx, v2d_cmd_t cmd)
 {
-	// TODO
+	// FIXME
 	return true;
 }
 
 void
 send_cmd(v2d_device_t *dev, v2d_cmd_t cmd)
 {
-	// TODO
+	unsigned encoded_cmd;
+	const int notify = 1;
+
+	switch (V2D_CMD_TYPE(cmd)) {
+	case V2D_CMD_TYPE_SRC_POS:
+		encoded_cmd = VINTAGE2D_CMD_SRC_POS(
+				V2D_CMD_POS_X(cmd),
+				V2D_CMD_POS_Y(cmd),
+				notify);
+		break;
+	case V2D_CMD_TYPE_DST_POS:
+		encoded_cmd = VINTAGE2D_CMD_DST_POS(
+				V2D_CMD_POS_X(cmd),
+				V2D_CMD_POS_Y(cmd),
+				notify);
+		break;
+	case V2D_CMD_TYPE_FILL_COLOR:
+		encoded_cmd = VINTAGE2D_CMD_FILL_COLOR(
+				V2D_CMD_COLOR(cmd),
+				notify);
+		break;
+	case V2D_CMD_TYPE_DO_FILL:
+		encoded_cmd = VINTAGE2D_CMD_DO_FILL(
+				V2D_CMD_WIDTH(cmd),
+				V2D_CMD_HEIGHT(cmd),
+				notify);
+		break;
+	case V2D_CMD_TYPE_DO_BLIT:
+		encoded_cmd = VINTAGE2D_CMD_DO_BLIT(
+				V2D_CMD_WIDTH(cmd),
+				V2D_CMD_HEIGHT(cmd),
+				notify);
+		break;
+	default:
+		return;
+	}
+
+	send_encoded_cmd(dev, encoded_cmd);
 }
 
 void
 sync_device(v2d_device_t *dev)
 {
-	// TODO
+	// FIXME
+	while (get_registry(dev, VINTAGE2D_STATUS));
 	dev->ctx = NULL;
 }
 
@@ -304,7 +352,8 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 				mutex_unlock(&ctx->mutex);
 				return -EINVAL;
 			}
-			ctx->history[ctx->history_it++] = cmd;
+			ctx->history[ctx->history_it] = cmd;
+			ctx->history_it = (ctx->history_it + 1) % 2;
 			mutex_unlock(&ctx->mutex);
 			break;
 		case V2D_CMD_TYPE_DO_FILL:
