@@ -96,9 +96,12 @@ cmds_count(v2d_device_t *dev)
 void
 send_encoded_cmd(v2d_device_t *dev, unsigned cmd)
 {
-	unsigned pos = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
-		- DEV_CMDS_DMA(dev)) / 4;
+	unsigned pos;
 
+	wait_event(dev->queue, cmds_count(dev) + 1 < CMDS_SIZE - 1);
+
+	pos = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
+			- DEV_CMDS_DMA(dev)) / 4;
 	DEV_CMDS_ADDR(dev)[pos] = cmd;
 	pos++;
 	if (pos == CMDS_SIZE - 1)
@@ -228,12 +231,10 @@ send_cmd(v2d_device_t *dev, v2d_cmd_t cmd)
 void
 sync_device(v2d_device_t *dev)
 {
-	// FIXME
-	while (get_registry(dev, VINTAGE2D_STATUS));
-	/*wait_event(dev->queue, 0 == (get_registry(dev, VINTAGE2D_STATUS) &*/
-				/*( VINTAGE2D_STATUS_DRAW*/
-				/*| VINTAGE2D_STATUS_FIFO*/
-				/*| VINTAGE2D_STATUS_FETCH_CMD)));*/
+	unsigned marker = get_registry(dev, VINTAGE2D_COUNTER) == 0 ? 1 : 0;
+
+	send_encoded_cmd(dev, VINTAGE2D_CMD_COUNTER(marker, 1));
+	wait_event(dev->queue, get_registry(dev, VINTAGE2D_COUNTER) == marker);
 	dev->ctx = NULL;
 }
 
@@ -449,8 +450,6 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 				mutex_unlock(&dev->mutex);
 				return -EINVAL;
 			}
-			wait_event(dev->queue,
-					cmds_count(dev) + 3 < CMDS_SIZE - 1);
 			if (dev->ctx != ctx) {
 				if (dev->ctx != NULL)
 					sync_device(dev);
