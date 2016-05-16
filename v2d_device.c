@@ -8,6 +8,7 @@ v2d_devices_init(v2d_device_t v2d_devices[], int size, int first_minor)
 
 	for(i=0; i<size; i++) {
 		mutex_init(&v2d_devices[i].mutex);
+		init_waitqueue_head(&v2d_devices[i].queue);
 		v2d_devices[i].minor = first_minor++;
 		v2d_devices[i].dev = NULL;
 	}

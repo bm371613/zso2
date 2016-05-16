@@ -4,6 +4,8 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
+#include <linux/sched.h>
+#include <linux/wait.h>
 
 #include "v2d_ioctl.h"
 #include "vintage2d.h"
@@ -29,6 +31,7 @@ struct v2d_context;
 
 typedef struct {
 	struct mutex mutex;
+	wait_queue_head_t queue;
 
 	struct v2d_context *ctx;
 

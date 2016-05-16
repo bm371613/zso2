@@ -230,6 +230,10 @@ sync_device(v2d_device_t *dev)
 {
 	// FIXME
 	while (get_registry(dev, VINTAGE2D_STATUS));
+	/*wait_event(dev->queue, 0 == (get_registry(dev, VINTAGE2D_STATUS) &*/
+				/*( VINTAGE2D_STATUS_DRAW*/
+				/*| VINTAGE2D_STATUS_FIFO*/
+				/*| VINTAGE2D_STATUS_FETCH_CMD)));*/
 	dev->ctx = NULL;
 }
 
@@ -238,6 +242,8 @@ irq_handler(int irq, void *dev)
 {
 	v2d_device_t *v2d_dev = dev;
 	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
+
+	wake_up(&v2d_dev->queue);
 
 	if (!(intr & VINTAGE2D_INTR_NOTIFY))
 		printk("v2d: not irq notify\n");
@@ -443,7 +449,8 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 				mutex_unlock(&dev->mutex);
 				return -EINVAL;
 			}
-			while (cmds_count(dev) + 3 > CMDS_SIZE - 2);
+			wait_event(dev->queue,
+					cmds_count(dev) + 3 < CMDS_SIZE - 1);
 			if (dev->ctx != ctx) {
 				if (dev->ctx != NULL)
 					sync_device(dev);
