@@ -31,7 +31,6 @@ v2d_context_initialize(v2d_context_t *ctx, uint16_t width, uint16_t height)
 			| ctx->canvas_pages[i].dma_handle;
 
 	return 0;
-
 outcanvas:
 	while(i--)
 		dma_addr_mapping_finalize(&ctx->canvas_pages[i], ctx->dev);
@@ -44,6 +43,7 @@ void
 v2d_context_finalize(v2d_context_t *ctx)
 {
 	int i;
+
 	if (ctx->canvas_pages_count > 0) {
 		for (i = 0; i < ctx->canvas_pages_count; ++i)
 			dma_addr_mapping_finalize(&ctx->canvas_pages[i],
@@ -54,3 +54,4 @@ v2d_context_finalize(v2d_context_t *ctx)
 	}
 	ctx->canvas_pages_count = 0;
 }
+

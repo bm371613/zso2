@@ -1,10 +1,15 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <linux/types.h>
+#include <linux/cdev.h>
+#include <linux/fs.h>
+#include <linux/interrupt.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
 #include <linux/sched.h>
+#include <linux/types.h>
 #include <linux/wait.h>
 
 #include "v2d_ioctl.h"
@@ -18,7 +23,6 @@
 
 #define DEV_CMDS_ADDR(v2d_dev) ((unsigned*) v2d_dev->cmds.addr)
 #define DEV_CMDS_DMA(v2d_dev) ((unsigned) v2d_dev->cmds.dma_handle)
-#define LOG_DEV(ctx) (&((ctx)->dev->dev->dev))
 
 typedef unsigned v2d_cmd_t;
 
@@ -60,7 +64,9 @@ typedef struct v2d_context {
 
 int
 dma_addr_mapping_initialize(dma_addr_mapping_t *dam, v2d_device_t *dev);
+
 void
 dma_addr_mapping_finalize(dma_addr_mapping_t *dam, v2d_device_t *dev);
 
 #endif
+

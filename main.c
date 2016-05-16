@@ -1,13 +1,3 @@
-#include <linux/cdev.h>
-#include <linux/device.h>
-#include <linux/fs.h>
-#include <linux/init.h>
-#include <linux/interrupt.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/pci.h>
-#include <asm/uaccess.h>
-
 #include "common.h"
 #include "v2d_device.h"
 #include "v2d_context.h"
@@ -28,21 +18,20 @@ static dev_t devno;
 static struct class *class;
 static v2d_device_t *devices;
 
-/* helpers */
-inline unsigned
+/* helpers *******************************************************************/
+static inline unsigned
 get_registry(v2d_device_t *dev, unsigned offset)
 {
 	return ioread32(dev->control + offset);
 }
 
-inline void
+static inline void
 set_registry(v2d_device_t *dev, unsigned offset, unsigned value)
 {
 	iowrite32(value, dev->control + offset);
 }
 
-
-void
+static void
 device_prepare(v2d_device_t *dev)
 {
 	unsigned cmds = DEV_CMDS_DMA(dev);
@@ -54,7 +43,6 @@ device_prepare(v2d_device_t *dev)
 			| VINTAGE2D_INTR_PAGE_FAULT
 			| VINTAGE2D_INTR_CANVAS_OVERFLOW
 			| VINTAGE2D_INTR_FIFO_OVERFLOW);
-
 
 	DEV_CMDS_ADDR(dev)[CMDS_SIZE - 1] = (cmds & (0xfffffffc)) | 2;
 	set_registry(dev, VINTAGE2D_CMD_READ_PTR, (unsigned) cmds);
@@ -69,7 +57,7 @@ device_prepare(v2d_device_t *dev)
 		| VINTAGE2D_ENABLE_FETCH_CMD);
 }
 
-void
+static void
 device_reset(v2d_device_t *dev)
 {
 	set_registry(dev, VINTAGE2D_ENABLE, 0);
@@ -83,38 +71,37 @@ device_reset(v2d_device_t *dev)
 			| VINTAGE2D_INTR_FIFO_OVERFLOW);
 }
 
-int
+static int
 cmds_count(v2d_device_t *dev)
 {
 	unsigned r = (get_registry(dev, VINTAGE2D_CMD_READ_PTR)
 			- DEV_CMDS_DMA(dev)) / 4,
 		 w = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
 			- DEV_CMDS_DMA(dev)) / 4;
+
 	return r <= w ? w - r : w + (CMDS_SIZE - 1 - r);
 }
 
-void
+static void
 send_encoded_cmd(v2d_device_t *dev, unsigned cmd)
 {
 	unsigned pos;
 
 	wait_event(dev->queue, cmds_count(dev) + 1 < CMDS_SIZE - 1);
-
 	pos = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
 			- DEV_CMDS_DMA(dev)) / 4;
-	DEV_CMDS_ADDR(dev)[pos] = cmd;
-	pos++;
+	DEV_CMDS_ADDR(dev)[pos++] = cmd;
 	if (pos == CMDS_SIZE - 1)
 		pos = 0;
-
 	set_registry(dev, VINTAGE2D_CMD_WRITE_PTR,
 			DEV_CMDS_DMA(dev) + 4 * pos);
 }
 
-void
+static void
 set_context(v2d_context_t *ctx)
 {
 	v2d_device_t *dev = ctx->dev;
+
 	set_registry(dev, VINTAGE2D_RESET, VINTAGE2D_RESET_DRAW
 			| VINTAGE2D_RESET_FIFO | VINTAGE2D_RESET_TLB);
 	send_encoded_cmd(dev, VINTAGE2D_CMD_CANVAS_PT(
@@ -124,7 +111,7 @@ set_context(v2d_context_t *ctx)
 	dev->ctx = ctx;
 }
 
-bool
+static bool
 validate_cmd(v2d_context_t *ctx, v2d_cmd_t cmd)
 {
 	unsigned color = V2D_CMD_COLOR(cmd),
@@ -144,7 +131,6 @@ validate_cmd(v2d_context_t *ctx, v2d_cmd_t cmd)
 			col = i;
 			break;
 		}
-
 
 #define assert(cond) if(!(cond)) {return false;};
 #define H(i) (ctx->history[i])
@@ -185,7 +171,7 @@ validate_cmd(v2d_context_t *ctx, v2d_cmd_t cmd)
 	return true;
 }
 
-void
+static void
 send_cmd(v2d_device_t *dev, v2d_cmd_t cmd)
 {
 	unsigned encoded_cmd;
@@ -224,11 +210,10 @@ send_cmd(v2d_device_t *dev, v2d_cmd_t cmd)
 	default:
 		return;
 	}
-
 	send_encoded_cmd(dev, encoded_cmd);
 }
 
-void
+static void
 sync_device(v2d_device_t *dev)
 {
 	unsigned marker = get_registry(dev, VINTAGE2D_COUNTER) == 0 ? 1 : 0;
@@ -238,52 +223,32 @@ sync_device(v2d_device_t *dev)
 	dev->ctx = NULL;
 }
 
-irqreturn_t
+static irqreturn_t
 irq_handler(int irq, void *dev)
 {
 	v2d_device_t *v2d_dev = dev;
 	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
 
 	wake_up(&v2d_dev->queue);
-
-	if (!(intr & VINTAGE2D_INTR_NOTIFY))
-		printk("v2d: not irq notify\n");
-
 	if (intr & VINTAGE2D_INTR_INVALID_CMD)
-		printk("v2d: irq invalid command\n");
-
+		printk(KERN_ERR "v2d: irq invalid command\n");
 	if (intr & VINTAGE2D_INTR_PAGE_FAULT)
-		printk("v2d: irq page fault\n");
-
+		printk(KERN_ERR "v2d: irq page fault\n");
 	if (intr & VINTAGE2D_INTR_CANVAS_OVERFLOW)
-		printk("v2d: irq canvas overflow\n");
-
+		printk(KERN_ERR "v2d: irq canvas overflow\n");
 	if (intr & VINTAGE2D_INTR_FIFO_OVERFLOW)
-		printk("v2d: irq fifo overflow\n");
-
+		printk(KERN_ERR "v2d: irq fifo overflow\n");
 	set_registry(dev, VINTAGE2D_INTR, VINTAGE2D_INTR_NOTIFY
 			| VINTAGE2D_INTR_INVALID_CMD
 			| VINTAGE2D_INTR_PAGE_FAULT
 			| VINTAGE2D_INTR_CANVAS_OVERFLOW
 			| VINTAGE2D_INTR_FIFO_OVERFLOW);
-
 	return IRQ_HANDLED;
 }
 
-/* vm */
-void v2d_vm_open(struct vm_area_struct *vma)
-{
-	v2d_context_t *ctx = vma->vm_private_data;
-	dev_info(LOG_DEV(ctx), "vm open %lx", vma->vm_pgoff);
-}
-
-void v2d_vm_close(struct vm_area_struct *vma)
-{
-	v2d_context_t *ctx = vma->vm_private_data;
-	dev_info(LOG_DEV(ctx), "vm close");
-}
-
-int v2d_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+/* vm ************************************************************************/
+static int
+v2d_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	pgoff_t pgoff = vmf->pgoff;
 	struct page *page;
@@ -292,23 +257,18 @@ int v2d_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (pgoff >= ctx->canvas_pages_count)
 		return VM_FAULT_SIGBUS;
 	page = pfn_to_page(__pa(ctx->canvas_pages[pgoff].addr) >> PAGE_SHIFT);
-	if (!page) {
-		dev_err(LOG_DEV(ctx), "pfn_to_page");
+	if (!page)
 		return VM_FAULT_SIGBUS;
-	}
 	get_page(page);
 	vmf->page = page;
 	return 0;
 }
 
 static struct vm_operations_struct v2d_vm_ops = {
-	.open = v2d_vm_open,
-	.close = v2d_vm_close,
 	.fault = v2d_vm_fault
 };
 
-/* file */
-
+/* file **********************************************************************/
 static int
 v2d_open(struct inode *inode, struct file *file)
 {
@@ -323,8 +283,6 @@ v2d_open(struct inode *inode, struct file *file)
 	mutex_init(&ctx->mutex);
 	ctx->dev = dev;
 	ctx->canvas_pages_count = 0;
-
-	dev_info(LOG_DEV(ctx), "context created");
 
 	file->private_data = (void*) ctx;
 	return 0;
@@ -342,10 +300,8 @@ v2d_release(struct inode *inode, struct file *file)
 		sync_device(dev);
 	v2d_context_finalize(ctx);
 	ctx->canvas_pages_count = -1;
-	dev_info(LOG_DEV(ctx), "context discarded");
 	mutex_unlock(&ctx->mutex);
 	mutex_unlock(&dev->mutex);
-
 	kfree(ctx);
 	return 0;
 }
@@ -359,11 +315,9 @@ v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	if (cmd != V2D_IOCTL_SET_DIMENSIONS)
 		return -ENOTTY;
-
 	if (copy_from_user((void*) &dim, (void*) arg,
 			sizeof(struct v2d_ioctl_set_dimensions)))
 		return -EFAULT;
-
 	mutex_lock(&ctx->mutex);
 	if (ctx->canvas_pages_count != 0
 			|| MIN_CANVAS_SIZE > dim.width
@@ -374,11 +328,7 @@ v2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return -EINVAL;
 	}
 	ret = v2d_context_initialize(ctx, dim.width, dim.height);
-	if (ret == 0)
-		dev_info(LOG_DEV(ctx), "context initialized (%d, %d)",
-				dim.width, dim.height);
 	mutex_unlock(&ctx->mutex);
-
 	return ret;
 }
 
@@ -395,8 +345,6 @@ v2d_mmap(struct file *file, struct vm_area_struct *vma)
 	vma->vm_private_data = file->private_data;
 	vma->vm_ops = &v2d_vm_ops;
 	mutex_unlock(&ctx->mutex);
-
-	v2d_vm_open(vma);
 	return 0;
 }
 
@@ -406,68 +354,64 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 	v2d_cmd_t cmd;
 	v2d_context_t *ctx = (v2d_context_t *) file->private_data;
 	v2d_device_t *dev = ctx->dev;
-	int i;
 
 	if (len % 4)
 		return -1;
-
-	for (i = 0; i + 4 <= len; i = i + 4) {
-		if (copy_from_user(&cmd, buffer + i, 4))
-			return -EFAULT;
-		switch (V2D_CMD_TYPE(cmd)) {
-		case V2D_CMD_TYPE_SRC_POS:
-		case V2D_CMD_TYPE_DST_POS:
-		case V2D_CMD_TYPE_FILL_COLOR:
-			mutex_lock(&ctx->mutex);
-			if (ctx->canvas_pages_count <= 0) {
-				mutex_unlock(&ctx->mutex);
-				return -EINVAL;
-			}
-			if (!validate_cmd(ctx, cmd)) {
-				mutex_unlock(&ctx->mutex);
-				return -EINVAL;
-			}
-			ctx->history[ctx->history_it] = cmd;
-			ctx->history_it = (ctx->history_it + 1) % 2;
+	if (copy_from_user(&cmd, buffer, 4))
+		return -EFAULT;
+	switch (V2D_CMD_TYPE(cmd)) {
+	case V2D_CMD_TYPE_SRC_POS:
+	case V2D_CMD_TYPE_DST_POS:
+	case V2D_CMD_TYPE_FILL_COLOR:
+		mutex_lock(&ctx->mutex);
+		if (ctx->canvas_pages_count <= 0) {
 			mutex_unlock(&ctx->mutex);
-			break;
-		case V2D_CMD_TYPE_DO_FILL:
-		case V2D_CMD_TYPE_DO_BLIT:
-			mutex_lock(&dev->mutex);
-			mutex_lock(&ctx->mutex);
-			if (ctx->canvas_pages_count <= 0) {
-				mutex_unlock(&ctx->mutex);
-				mutex_unlock(&dev->mutex);
-				return -EINVAL;
-			}
-			if (dev->dev == NULL) {
-				mutex_unlock(&ctx->mutex);
-				mutex_unlock(&dev->mutex);
-				return -ENODEV;
-			}
-			if (!validate_cmd(ctx, cmd)) {
-				mutex_unlock(&ctx->mutex);
-				mutex_unlock(&dev->mutex);
-				return -EINVAL;
-			}
-			if (dev->ctx != ctx) {
-				if (dev->ctx != NULL)
-					sync_device(dev);
-				set_context(ctx);
-			}
-			send_cmd(dev, ctx->history[0]);
-			send_cmd(dev, ctx->history[1]);
-			send_cmd(dev, cmd);
-			ctx->history[ctx->history_it] = cmd;
-			ctx->history_it = (ctx->history_it + 1) % 2;
-			mutex_unlock(&ctx->mutex);
-			mutex_unlock(&dev->mutex);
-			break;
-		default:
 			return -EINVAL;
 		}
+		if (!validate_cmd(ctx, cmd)) {
+			mutex_unlock(&ctx->mutex);
+			return -EINVAL;
+		}
+		ctx->history[ctx->history_it] = cmd;
+		ctx->history_it = (ctx->history_it + 1) % 2;
+		mutex_unlock(&ctx->mutex);
+		break;
+	case V2D_CMD_TYPE_DO_FILL:
+	case V2D_CMD_TYPE_DO_BLIT:
+		mutex_lock(&dev->mutex);
+		mutex_lock(&ctx->mutex);
+		if (ctx->canvas_pages_count <= 0) {
+			mutex_unlock(&ctx->mutex);
+			mutex_unlock(&dev->mutex);
+			return -EINVAL;
+		}
+		if (dev->dev == NULL) {
+			mutex_unlock(&ctx->mutex);
+			mutex_unlock(&dev->mutex);
+			return -ENODEV;
+		}
+		if (!validate_cmd(ctx, cmd)) {
+			mutex_unlock(&ctx->mutex);
+			mutex_unlock(&dev->mutex);
+			return -EINVAL;
+		}
+		if (dev->ctx != ctx) {
+			if (dev->ctx != NULL)
+				sync_device(dev);
+			set_context(ctx);
+		}
+		send_cmd(dev, ctx->history[0]);
+		send_cmd(dev, ctx->history[1]);
+		send_cmd(dev, cmd);
+		ctx->history[ctx->history_it] = cmd;
+		ctx->history_it = (ctx->history_it + 1) % 2;
+		mutex_unlock(&ctx->mutex);
+		mutex_unlock(&dev->mutex);
+		break;
+	default:
+		return -EINVAL;
 	}
-	return i;
+	return 4;
 }
 
 static int
@@ -478,7 +422,6 @@ v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	int ret = 0;
 
 	mutex_lock(&dev->mutex);
-
 	if (dev->dev == NULL) {
 		ret = -ENODEV;
 		goto out;
@@ -487,7 +430,6 @@ v2d_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 		ret = -EINVAL;
 		goto out;
 	}
-
 	sync_device(dev);
 out:
 	mutex_unlock(&dev->mutex);
@@ -504,8 +446,7 @@ static struct file_operations v2d_file_ops = {
 	.fsync		= v2d_fsync
 };
 
-/* pci */
-
+/* pci ***********************************************************************/
 static int
 v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -537,28 +478,23 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		dev_err(&(dev->dev), "device_create");
 		goto outdevice;
 	}
-
 	if (pci_enable_device(dev)) {
 		dev_err(&(dev->dev), "pci_enable_device");
 		goto outenable;
 	}
-
 	if (IS_ERR_VALUE(pci_request_regions(dev, "v2d"))) {
 		dev_err(&(dev->dev), "pci_request_regions");
 		goto outregions;
 	}
-
 	v2d_dev->control = pci_iomap(dev, 0, 4096);
 	if (!v2d_dev->control) {
 		dev_err(&(dev->dev), "pci_iomap");
 		goto outiomap;
 	}
-
 	if (request_irq(dev->irq, irq_handler, IRQF_SHARED, "v2d", v2d_dev)) {
 		dev_err(&(dev->dev), "request_irq");
 		goto outirq;
 	}
-
 	if (dma_addr_mapping_initialize(&v2d_dev->cmds, v2d_dev)) {
 		dev_err(&(dev->dev), "dma_addr_mapping_initialize");
 		goto outcmds;
@@ -567,13 +503,8 @@ v2d_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	pci_set_master(dev);
 	pci_set_dma_mask(dev, DMA_BIT_MASK(32));
 	pci_set_consistent_dma_mask(dev, DMA_BIT_MASK(32));
-
 	device_prepare(v2d_dev);
-
-	dev_info(&(dev->dev), "registered %d", minor);
-
 	return 0;
-
 outcmds:
 	free_irq(dev->irq, v2d_dev);
 outirq:
@@ -617,8 +548,7 @@ static struct pci_driver v2d_pci_driver = {
 	.remove 	= v2d_remove,
 };
 
-/* module interface */
-
+/* module ********************************************************************/
 static int __init
 v2d_init_module(void)
 {
@@ -628,7 +558,6 @@ v2d_init_module(void)
 		printk(KERN_ERR "v2d: kmalloc\n");
 		goto outalloc;
 	}
-
 	if (alloc_chrdev_region(&devno, 0, max_devices, "v2d") < 0) {
 		printk(KERN_ERR "v2d: alloc_chrdev_region\n");
 		goto outchrdev;
@@ -641,14 +570,11 @@ v2d_init_module(void)
 		printk(KERN_ERR "v2d: class_create\n");
 		goto outclass;
 	}
-
 	if (pci_register_driver(&v2d_pci_driver) < 0) {
 		printk(KERN_ERR "v2d: pci_register_driver\n");
 		goto outregister;
 	}
-
 	return 0;
-
 outregister:
 	class_destroy(class);
 outclass:

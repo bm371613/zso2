@@ -19,3 +19,4 @@ dma_addr_mapping_finalize(dma_addr_mapping_t *dam, v2d_device_t *dev)
 	dma_free_coherent(&(dev->dev->dev), VINTAGE2D_PAGE_SIZE,
 			dam->addr, dam->dma_handle);
 }
+

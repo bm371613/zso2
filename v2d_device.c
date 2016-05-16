@@ -1,4 +1,3 @@
-#include <linux/kernel.h>
 #include "v2d_device.h"
 
 void
@@ -25,7 +24,6 @@ v2d_devices_add(v2d_device_t v2d_devices[], int size, struct pci_dev *dev)
 			return &v2d_devices[i];
 		}
 	}
-
 	return NULL;
 }
 
@@ -67,3 +65,4 @@ v2d_devices_by_dev(v2d_device_t v2d_devices[], int size, struct pci_dev *dev)
 	}
 	return NULL;
 }
+
