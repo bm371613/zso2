@@ -1,0 +1,28 @@
+Do skompilowania modułu wystarczy polecenie make.
+
+Pliki common.* definiują podstawowe typy i funkcje używane we wszystkich
+pozostałych, w tym v2d_device_t odpowiadający pojedynczemu urządzeniu i
+v2d_context_t odpowiadający pojedynczemu otwarciu urządzenia znakowego.
+
+Pliki v2d_device.* definiują funkcje obsługujące globalną tablicę urządzeń.
+
+Pliki v2d_context.* definiują funkcje do inicjalizacji i finalizacji kontekstu,
+co wiąże się głównie z obsługą tablicy stron dla urządzenia.
+
+Plik main.c definiuje interfejsy: modułu, sterownika PCI, urządzenia znakowego.
+Tu znajduje się cała interakcja z właściwym urządzeniem. Komendy przesyłane
+są przy pomocy bloku wczytywania poleceń. Każde urządzenie ma przydzieloną na
+ten cel jedną stronę pamięci DMA, używaną jak bufor cykliczny. W każdym
+momencie na stronie z poleceniami znajdują się polecenie pochodzące z tego
+samego, przypisanego do urządzenia kontekstu. Zapis do urządzenia znakowego
+poleceń innych niż DO_FILL i DO_BLIT powoduje jedynie zapis ich w buforze
+kontekstu. Dopiero podczas zapisu jednego z tych dwóch poleceń:
+    - jeżeli bieżący kontekst nie jest przypisany, przypisany kontekst jest
+      synchronizowany i bieżący zostaje przypisany urządzeniu,
+    - zapisywane są polecenia z bufora kontekstu i to obsługiwane.
+Polecenia są wykonywane asynchronicznie. Synchronizacja następuje:
+    - przy kolejnym przełączeniu kontekstu,
+    - podczas zamykania kontekstu,
+    - na żądanie (fsync)
+i polega na wysłaniu polecenia COUNTER i oczekiwaniu na jego efekt.
+
