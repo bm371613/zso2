@@ -56,7 +56,7 @@ device_prepare(v2d_device_t *dev)
 			| VINTAGE2D_INTR_FIFO_OVERFLOW);
 
 
-	DEV_CMDS_ADDR(dev)[MAX_CMDS - 1] = (cmds & (0xfffffffc)) | 2;
+	DEV_CMDS_ADDR(dev)[CMDS_SIZE - 1] = (cmds & (0xfffffffc)) | 2;
 	set_registry(dev, VINTAGE2D_CMD_READ_PTR, (unsigned) cmds);
 	set_registry(dev, VINTAGE2D_CMD_WRITE_PTR, (unsigned) cmds);
 
@@ -83,16 +83,25 @@ device_reset(v2d_device_t *dev)
 			| VINTAGE2D_INTR_FIFO_OVERFLOW);
 }
 
+int
+cmds_count(v2d_device_t *dev)
+{
+	unsigned r = (get_registry(dev, VINTAGE2D_CMD_READ_PTR)
+			- DEV_CMDS_DMA(dev)) / 4,
+		 w = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
+			- DEV_CMDS_DMA(dev)) / 4;
+	return r <= w ? w - r : w + (CMDS_SIZE - 1 - r);
+}
+
 void
 send_encoded_cmd(v2d_device_t *dev, unsigned cmd)
 {
-	// TODO wait for place in queue
 	unsigned pos = (get_registry(dev, VINTAGE2D_CMD_WRITE_PTR)
 		- DEV_CMDS_DMA(dev)) / 4;
 
 	DEV_CMDS_ADDR(dev)[pos] = cmd;
 	pos++;
-	if (pos == MAX_CMDS - 1)
+	if (pos == CMDS_SIZE - 1)
 		pos = 0;
 
 	set_registry(dev, VINTAGE2D_CMD_WRITE_PTR,
@@ -230,8 +239,8 @@ irq_handler(int irq, void *dev)
 	v2d_device_t *v2d_dev = dev;
 	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
 
-	if (intr & VINTAGE2D_INTR_NOTIFY)
-		printk("v2d: irq notify\n");
+	if (!(intr & VINTAGE2D_INTR_NOTIFY))
+		printk("v2d: not irq notify\n");
 
 	if (intr & VINTAGE2D_INTR_INVALID_CMD)
 		printk("v2d: irq invalid command\n");
@@ -434,6 +443,7 @@ v2d_write(struct file *file, const char *buffer, size_t len, loff_t *off)
 				mutex_unlock(&dev->mutex);
 				return -EINVAL;
 			}
+			while (cmds_count(dev) + 3 > CMDS_SIZE - 2);
 			if (dev->ctx != ctx) {
 				if (dev->ctx != NULL)
 					sync_device(dev);
