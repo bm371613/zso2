@@ -229,6 +229,13 @@ irq_handler(int irq, void *dev)
 	v2d_device_t *v2d_dev = dev;
 	unsigned intr = get_registry(dev, VINTAGE2D_INTR);
 
+	if (!(get_registry(dev, VINTAGE2D_INTR) && (VINTAGE2D_INTR_NOTIFY
+			| VINTAGE2D_INTR_INVALID_CMD
+			| VINTAGE2D_INTR_PAGE_FAULT
+			| VINTAGE2D_INTR_CANVAS_OVERFLOW
+			| VINTAGE2D_INTR_FIFO_OVERFLOW)))
+		return IRQ_NONE;
+
 	wake_up(&v2d_dev->queue);
 	if (intr & VINTAGE2D_INTR_INVALID_CMD)
 		printk(KERN_ERR "v2d: irq invalid command\n");
